@@ -317,10 +317,31 @@ function renderPlaylistCards(playlists, container) {
 }
 
 async function loadPlaylist(id) {
-    sidebarList.innerHTML = '<li style="color:#555;text-align:center;padding:20px;">loading...</li>';
+    console.log('[y2kify] Loading playlist:', id);
+    sidebarList.innerHTML = '<li style="color:#555;text-align:center;padding:20px;font-size:12px;">loading tracks...</li>';
+
     const data = await sp(`/playlists/${id}/tracks?limit=100`);
-    if (!data) return;
-    const tracks = data.items.map(i => i.track).filter(Boolean);
+    console.log('[y2kify] Playlist tracks raw response:', data);
+
+    if (!data || !data.items) {
+        sidebarList.innerHTML = '<li style="color:#555;text-align:center;padding:20px;font-size:12px;">failed to load tracks</li>';
+        return;
+    }
+
+    console.log('[y2kify] Total items in playlist:', data.items.length);
+
+    // Filter out null tracks (local files, unavailable songs, episodes)
+    const tracks = data.items
+        .map(item => {
+            if (!item) { console.warn('[y2kify] null item'); return null; }
+            if (!item.track) { console.warn('[y2kify] null track in item:', item); return null; }
+            if (!item.track.artists || !item.track.artists.length) { console.warn('[y2kify] track with no artists:', item.track.name); return null; }
+            return item.track;
+        })
+        .filter(Boolean);
+
+    console.log('[y2kify] Renderable tracks after filter:', tracks.length);
+
     currentTrackList = tracks;
     currentTrackIdx = -1;
     renderSidebarTracks(tracks);
@@ -425,21 +446,46 @@ async function playTrack(title, artist, album, coverUrl, idx) {
     setPlayPauseIcon(false);
 
     try {
-        const r = await fetch(`/api/stream?q=${encodeURIComponent(title + ' ' + artist)}`);
-        if (!r.ok) throw new Error('stream fetch failed');
+        const q = encodeURIComponent(`${title} ${artist}`);
+        console.log(`[y2kify] Fetching stream for: ${title} - ${artist}`);
+        npTitle.textContent = `${title.toLowerCase()} ⟨loading...⟩`;
+
+        const r = await fetch(`/api/stream?q=${q}`);
         const data = await r.json();
 
+        if (!r.ok) {
+            console.error('[y2kify] Stream error response:', data);
+            npTitle.textContent = title.toLowerCase();
+            npMeta.textContent = `stream error: ${data.error || r.status}`;
+            return;
+        }
+
+        console.log('[y2kify] Got stream URL:', data.streamUrl);
+        npTitle.textContent = title.toLowerCase();
+
+        // data.streamUrl is already our own /api/proxy-stream?url=... path
+        // so the browser fetches audio from our server with no CORS issue
         currentAudio = new Audio(data.streamUrl);
         currentAudio.volume = currentVolume;
         currentAudio.addEventListener('timeupdate', updateProgress);
         currentAudio.addEventListener('ended', onTrackEnd);
+        currentAudio.addEventListener('error', (e) => {
+            console.error('[y2kify] Audio element error:', e);
+            npMeta.textContent = 'playback error — try another track';
+            isPlaying = false;
+            setPlayPauseIcon(false);
+        });
+
         await currentAudio.play();
         isPlaying = true;
         setPlayPauseIcon(true);
+        console.log('[y2kify] Playing:', title);
     } catch(e) {
-        console.error(e);
-        npMeta.textContent = 'stream error — try another track';
+        console.error('[y2kify] playTrack exception:', e);
+        if (npTitle) npTitle.textContent = title.toLowerCase();
+        if (npMeta) npMeta.textContent = 'stream error — try another track';
         isPlaying = false;
+        setPlayPauseIcon(false);
     }
 }
 
