@@ -319,7 +319,10 @@ function renderPlaylistCards(playlists, container) {
 async function loadPlaylist(id) {
     sidebarList.innerHTML = '<li style="color:#555;text-align:center;padding:20px;">loading...</li>';
     const data = await sp(`/playlists/${id}/tracks?limit=100`);
-    if (!data) return;
+    if (!data) {
+        sidebarList.innerHTML = '<li style="color:#d44;text-align:center;padding:20px;font-size:12px;">Failed to load playlist. Click "logout" and log back in to refresh permissions.</li>';
+        return;
+    }
     const tracks = data.items.map(i => i.track).filter(Boolean);
     currentTrackList = tracks;
     currentTrackIdx = -1;
@@ -382,7 +385,10 @@ function setupSearch() {
 async function triggerSearch(query) {
     sidebarList.innerHTML = `<li style="color:#555;text-align:center;padding:12px;">searching...</li>`;
     const data = await sp(`/search?q=${encodeURIComponent(query)}&type=track&limit=30`);
-    if (!data || !data.tracks) return;
+    if (!data || !data.tracks) {
+        sidebarList.innerHTML = `<li style="color:#555;text-align:center;padding:12px;">search failed (try logging out and back in)</li>`;
+        return;
+    }
     const tracks = data.tracks.items.filter(Boolean);
     currentTrackList = tracks;
     currentTrackIdx = -1;
