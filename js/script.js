@@ -1,4 +1,3 @@
-// Audio Context
 let currentAudio = null;
 let currentAccessToken = null;
 let isPlaying = false;
@@ -6,9 +5,12 @@ let isPlaying = false;
 // DOM Elements
 const loginBtn = document.getElementById('login-btn');
 const userGreeting = document.getElementById('user-greeting');
-const userAvatar = document.getElementById('user-avatar');
 const playlistSelector = document.getElementById('playlist-selector');
 const tracklistEl = document.getElementById('sidebar-tracklist');
+const featuredCardsEl = document.querySelector('.featured-cards');
+const searchInput = document.querySelector('.search-input');
+
+// Player Meta Elements
 const playPauseBtns = document.querySelectorAll('.play-pause');
 const npTitle = document.getElementById('np-title');
 const npArtist = document.getElementById('np-artist');
@@ -18,27 +20,39 @@ const timeCurrent = document.getElementById('time-current');
 const timeTotal = document.getElementById('time-total');
 const progressFill = document.getElementById('main-progress-fill');
 const progressBar = document.getElementById('main-progress');
-const statusMarquee = document.getElementById('status-marquee');
-const statusLoading = document.getElementById('status-loading');
+const miniCover = document.querySelector('.mini-cover');
+const miniTitle = document.querySelector('.m-title');
+const miniArtist = document.querySelector('.m-artist');
 
-const PLAY_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" class="play-icon"><path d="M8 5v14l11-7z"/></svg>';
-const PAUSE_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" class="pause-icon"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+const PLAY_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" class="play-icon" width="14" height="14"><path d="M8 5v14l11-7z"/></svg>';
+const PAUSE_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" class="pause-icon" width="14" height="14"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
 
-// Initialization
 document.addEventListener('DOMContentLoaded', () => {
     checkToken();
     setupPlayPauseButtons();
     setupProgressBar();
+    setupSearch();
 });
 
-// Auth
+// --- AUTH & SETUP --- //
 function checkToken() {
     const hash = window.location.hash.substring(1);
     const params = new URLSearchParams(hash);
     if (params.has('access_token')) {
         currentAccessToken = params.get('access_token');
-        window.history.replaceState(null, null, ' '); // hide token from url
-        loginBtn.style.display = 'none';
+        localStorage.setItem('spotify_token', currentAccessToken);
+        window.history.replaceState(null, null, window.location.pathname); // Hide token
+    } else {
+        currentAccessToken = localStorage.getItem('spotify_token');
+    }
+
+    if (currentAccessToken) {
+        loginBtn.textContent = 'logout';
+        loginBtn.href = '#';
+        loginBtn.addEventListener('click', () => {
+            localStorage.removeItem('spotify_token');
+            window.location.reload();
+        });
         initSpotifySession();
     }
 }
@@ -49,6 +63,11 @@ async function fetchSpotify(endpoint) {
         const res = await fetch(`https://api.spotify.com/v1${endpoint}`, {
             headers: { 'Authorization': `Bearer ${currentAccessToken}` }
         });
+        if (res.status === 401) {
+            // Token expired
+            localStorage.removeItem('spotify_token');
+            window.location.reload();
+        }
         if (!res.ok) throw new Error(res.statusText);
         return await res.json();
     } catch (e) {
@@ -58,20 +77,17 @@ async function fetchSpotify(endpoint) {
 }
 
 async function initSpotifySession() {
-    // Get Profile
+    // 1. Get User Profile
     const profile = await fetchSpotify('/me');
     if (profile) {
         userGreeting.textContent = profile.display_name.toLowerCase();
-        if (profile.images && profile.images.length > 0) {
-            userAvatar.src = profile.images[0].url;
-            userAvatar.style.display = 'block';
-        }
     }
 
-    // Get Playlists
-    const playlistsData = await fetchSpotify('/me/playlists?limit=50');
+    // 2. Get Playlists
+    const playlistsData = await fetchSpotify('/me/playlists?limit=20');
     if (playlistsData && playlistsData.items) {
-        playlistSelector.innerHTML = '<option value="">Select a playlist...</option>';
+        // Render Dropdown
+        playlistSelector.innerHTML = '<option value="">select a playlist...</option>';
         playlistsData.items.forEach(pl => {
             if(!pl) return;
             const opt = document.createElement('option');
@@ -81,24 +97,67 @@ async function initSpotifySession() {
         });
 
         playlistSelector.addEventListener('change', (e) => {
-            if (e.target.value) {
-                loadPlaylistTracks(e.target.value);
-            }
+            if (e.target.value) loadPlaylistTracks(e.target.value);
+        });
+
+        // Render Featured Cards (first 5 playlists)
+        featuredCardsEl.innerHTML = '';
+        playlistsData.items.slice(0, 5).forEach(pl => {
+            if(!pl) return;
+            const imgUrl = pl.images && pl.images.length > 0 ? pl.images[0].url : 'https://via.placeholder.com/120x120/111/444?text=playlist';
+            const owner = pl.owner ? pl.owner.display_name.toLowerCase() : 'spotify';
+            
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.style.cursor = 'pointer';
+            card.innerHTML = `
+                <div class="card-img-wrapper">
+                  <img src="${imgUrl}" alt="${pl.name}">
+                </div>
+                <h3>${pl.name.toLowerCase()}</h3>
+                <p>${owner}</p>
+            `;
+            card.addEventListener('click', () => {
+                playlistSelector.value = pl.id;
+                loadPlaylistTracks(pl.id);
+            });
+            featuredCardsEl.appendChild(card);
         });
     }
 }
 
+// --- DATA FETCHING --- //
 async function loadPlaylistTracks(playlistId) {
-    tracklistEl.innerHTML = '<li style="color:var(--text-muted); text-align:center; padding:20px;">Loading tracks...</li>';
+    tracklistEl.innerHTML = '<li style="color:#111; text-align:center; padding:20px;">loading tracks...</li>';
     const data = await fetchSpotify(`/playlists/${playlistId}/tracks?limit=50`);
     if (!data || !data.items) return;
 
+    renderTracklist(data.items.map(item => item.track).filter(t => t));
+}
+
+function setupSearch() {
+    searchInput.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter' && searchInput.value.trim() !== '') {
+            tracklistEl.innerHTML = '<li style="color:#111; text-align:center; padding:20px;">searching...</li>';
+            const query = encodeURIComponent(searchInput.value.trim());
+            const data = await fetchSpotify(`/search?q=${query}&type=track&limit=20`);
+            if (data && data.tracks && data.tracks.items) {
+                renderTracklist(data.tracks.items);
+            }
+        }
+    });
+}
+
+function renderTracklist(tracks) {
     tracklistEl.innerHTML = '';
-    data.items.forEach((item, index) => {
-        if (!item.track) return;
-        const track = item.track;
+    tracks.forEach((track, index) => {
         const li = document.createElement('li');
-        li.dataset.uri = track.uri;
+        li.style.color = '#111';
+        li.style.borderBottom = '1px solid rgba(0,0,0,0.1)';
+        li.style.padding = '8px 16px';
+        li.style.cursor = 'pointer';
+        li.style.display = 'flex';
+        li.style.justifyContent = 'space-between';
         
         const num = (index + 1).toString().padStart(2, '0');
         const title = track.name.toLowerCase();
@@ -108,19 +167,17 @@ async function loadPlaylistTracks(playlistId) {
         const time = `${minutes}:${seconds}`;
 
         li.innerHTML = `
-            <span class="track-num">${num}</span>
-            <div class="track-info">
-            <span class="t-title">${title}</span>
-            <span class="t-artist">${artist}</span>
+            <div style="display:flex; gap:12px;">
+                <span style="color:#555; font-family:monospace;">${num}</span>
+                <div style="display:flex; flex-direction:column;">
+                    <span style="font-weight:600; font-size:12px;">${title}</span>
+                    <span style="font-size:10px; color:#555;">${artist}</span>
+                </div>
             </div>
-            <span class="track-time">${time}</span>
+            <span style="font-size:11px; color:#555; font-family:monospace; margin-top:2px;">${time}</span>
         `;
         
         li.addEventListener('click', () => {
-            // Remove active from others
-            document.querySelectorAll('#sidebar-tracklist li').forEach(el => el.classList.remove('active-track'));
-            li.classList.add('active-track');
-            
             let coverUrl = '';
             if(track.album && track.album.images && track.album.images.length > 0) {
                 coverUrl = track.album.images[0].url;
@@ -132,22 +189,31 @@ async function loadPlaylistTracks(playlistId) {
     });
 }
 
+// --- AUDIO STREAMING & PLAYER --- //
 async function playTrack(title, artist, album, coverUrl) {
     // Update UI Meta
-    npTitle.textContent = title;
-    npArtist.textContent = artist;
-    npAlbum.textContent = album || 'single';
-    if(coverUrl) npCover.src = coverUrl;
-    statusMarquee.textContent = `${title} - ${artist} • fetching ad-free stream... • `;
-    statusLoading.style.display = 'inline';
+    npTitle.textContent = title.toLowerCase();
+    npArtist.textContent = artist.toLowerCase();
+    npAlbum.textContent = (album || 'single').toLowerCase();
+    
+    if(coverUrl) {
+        npCover.src = coverUrl;
+        if(miniCover) miniCover.src = coverUrl;
+    }
+    if(miniTitle) miniTitle.textContent = title.toLowerCase();
+    if(miniArtist) miniArtist.textContent = artist.toLowerCase();
 
     if (currentAudio) {
         currentAudio.pause();
     }
 
+    // Default title to loading state
+    document.title = `y2kify • loading ${title.toLowerCase()}...`;
+
     try {
         // Ask backend for audio stream
         const query = encodeURIComponent(`${title} ${artist}`);
+        // We use the live render URL implicitly if hosted, or localhost
         const res = await fetch(`/api/stream?q=${query}`);
         if (!res.ok) throw new Error('Failed to fetch stream');
         
@@ -160,14 +226,12 @@ async function playTrack(title, artist, album, coverUrl) {
         await currentAudio.play();
         isPlaying = true;
         updatePlayPauseUI();
-        statusLoading.style.display = 'none';
-        statusMarquee.textContent = `${title} - ${artist} • playing • `;
+        document.title = `y2kify • ${title.toLowerCase()}`;
         
     } catch (e) {
         console.error(e);
-        statusLoading.style.display = 'none';
-        statusMarquee.textContent = `error playing ${title} • `;
-        alert('Failed to find free audio stream for this track.');
+        document.title = `y2kify • error`;
+        alert('Failed to find free audio stream for this track on YouTube/Piped.');
     }
 }
 
@@ -184,6 +248,7 @@ function updateProgress() {
 }
 
 function setupProgressBar() {
+    if(!progressBar) return;
     progressBar.addEventListener('click', (e) => {
         if (!currentAudio) return;
         const rect = progressBar.getBoundingClientRect();
@@ -218,10 +283,8 @@ function updatePlayPauseUI() {
     playPauseBtns.forEach(btn => {
         if (isPlaying) {
             btn.innerHTML = PAUSE_ICON;
-            btn.style.boxShadow = '0 4px 10px rgba(0,0,0,0.5), inset 0 2px 5px rgba(255,255,255,0.2)';
         } else {
             btn.innerHTML = PLAY_ICON;
-            btn.style.boxShadow = '0 0 15px rgba(138, 93, 230, 0.8), inset 0 2px 5px rgba(255,255,255,0.2)';
         }
     });
 }
