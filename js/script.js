@@ -1,12 +1,14 @@
 // ─── STATE ──────────────────────────────────────────────────────────────────
 let currentAudio    = null;
 let currentToken    = null;
+let refreshToken    = null;
+let tokenExpiresAt  = 0;      // unix ms
 let isPlaying       = false;
 let isShuffle       = false;
 let isRepeat        = false;
 let currentVolume   = 0.8;
-let currentTrackList = [];   // the active set of tracks (search / playlist)
-let currentTrackIdx = -1;    // which track is playing
+let currentTrackList = [];
+let currentTrackIdx = -1;
 
 // ─── DOM REFS ────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -57,11 +59,18 @@ function checkToken() {
     const hash = window.location.hash.substring(1);
     const params = new URLSearchParams(hash);
     if (params.has('access_token')) {
-        currentToken = params.get('access_token');
-        localStorage.setItem('sp_token', currentToken);
+        currentToken   = params.get('access_token');
+        refreshToken   = params.get('refresh_token') || null;
+        const expiresIn = parseInt(params.get('expires_in') || '3600', 10);
+        tokenExpiresAt  = Date.now() + expiresIn * 1000 - 60000; // 1 min early
+        localStorage.setItem('sp_token',      currentToken);
+        localStorage.setItem('sp_refresh',     refreshToken || '');
+        localStorage.setItem('sp_expires_at',  tokenExpiresAt);
         window.history.replaceState(null, null, window.location.pathname);
     } else {
-        currentToken = localStorage.getItem('sp_token');
+        currentToken   = localStorage.getItem('sp_token');
+        refreshToken   = localStorage.getItem('sp_refresh') || null;
+        tokenExpiresAt  = parseInt(localStorage.getItem('sp_expires_at') || '0', 10);
     }
 
     if (currentToken) {
@@ -69,7 +78,7 @@ function checkToken() {
         loginBtn.href = '#';
         loginBtn.addEventListener('click', e => {
             e.preventDefault();
-            localStorage.removeItem('sp_token');
+            ['sp_token','sp_refresh','sp_expires_at'].forEach(k => localStorage.removeItem(k));
             window.location.reload();
         });
         initSession();
@@ -77,15 +86,43 @@ function checkToken() {
 }
 
 async function sp(endpoint) {
+    // Auto-refresh token if it's expired
+    if (tokenExpiresAt && Date.now() > tokenExpiresAt && refreshToken) {
+        try {
+            const r = await fetch('/auth/refresh', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_token: refreshToken })
+            });
+            if (r.ok) {
+                const d = await r.json();
+                currentToken  = d.access_token;
+                tokenExpiresAt = Date.now() + (d.expires_in || 3600) * 1000 - 60000;
+                localStorage.setItem('sp_token', currentToken);
+                localStorage.setItem('sp_expires_at', tokenExpiresAt);
+            }
+        } catch(e) { console.error('Token refresh failed:', e); }
+    }
     if (!currentToken) return null;
     try {
         const r = await fetch(`https://api.spotify.com/v1${endpoint}`, {
             headers: { Authorization: `Bearer ${currentToken}` }
         });
-        if (r.status === 401) { localStorage.removeItem('sp_token'); window.location.reload(); }
-        if (!r.ok) throw new Error(r.statusText);
+        if (r.status === 401) {
+            // Force re-login
+            ['sp_token','sp_refresh','sp_expires_at'].forEach(k => localStorage.removeItem(k));
+            loginBtn.textContent = 'login with spotify';
+            loginBtn.href = '/auth/login';
+            currentToken = null;
+            return null;
+        }
+        if (r.status === 403) {
+            console.warn('Spotify 403 on', endpoint, '— likely missing scope. Re-login to grant new permissions.');
+            return null;
+        }
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
         return r.json();
-    } catch(e) { console.error('Spotify:', e); return null; }
+    } catch(e) { console.error('Spotify API error:', endpoint, e); return null; }
 }
 
 async function initSession() {
