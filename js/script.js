@@ -126,31 +126,46 @@ async function sp(endpoint) {
 }
 
 async function initSession() {
-    // Profile
+    console.log('[y2kify] Initialising Spotify session...');
+
+    // 1. User profile
     const me = await sp('/me');
-    if (me) userGreeting.textContent = me.display_name.toLowerCase();
+    if (me) {
+        console.log('[y2kify] Logged in as:', me.display_name);
+        userGreeting.textContent = (me.display_name || 'listener').toLowerCase();
+    } else {
+        console.warn('[y2kify] Could not fetch profile');
+    }
 
-    // Playlists
+    // 2. Playlists
     const pData = await sp('/me/playlists?limit=50');
-    if (pData && pData.items) {
+    console.log('[y2kify] Playlists response:', pData);
+    if (pData && Array.isArray(pData.items)) {
         const playlists = pData.items.filter(Boolean);
+        console.log('[y2kify] Got', playlists.length, 'playlists');
 
-        // Dropdown
+        // Populate dropdown
         playlistSelector.innerHTML = '<option value="">select a playlist...</option>';
         playlists.forEach(pl => {
-            const o = document.createElement('option');
-            o.value = pl.id;
-            o.textContent = `${pl.name.toLowerCase()} (${pl.tracks.total})`;
-            playlistSelector.appendChild(o);
+            try {
+                const o = document.createElement('option');
+                o.value = pl.id;
+                const total = pl.tracks ? pl.tracks.total : '?';
+                o.textContent = `${(pl.name || 'untitled').toLowerCase()} (${total})`;
+                playlistSelector.appendChild(o);
+            } catch(err) { console.warn('playlist dropdown error', err); }
         });
         playlistSelector.addEventListener('change', e => {
             if (e.target.value) loadPlaylist(e.target.value);
         });
 
         // Featured cards (home)
-        renderPlaylistCards(playlists.slice(0, 8), featuredCards);
+        renderPlaylistCards(playlists.slice(0, 10), featuredCards);
         // All playlists view
         renderPlaylistCards(playlists, $('all-playlists-grid'));
+    } else {
+        console.warn('[y2kify] No playlists returned or bad format');
+        if (featuredCards) featuredCards.innerHTML = '<div style="color:#555;padding:20px;font-size:12px;">no playlists found — try re-logging in</div>';
     }
 }
 
