@@ -87,40 +87,62 @@ app.get('/api/stream', async (req, res) => {
     if (!q) return res.status(400).json({ error: 'Query required' });
 
     try {
-        // 1. Find the YouTube video
         const results = await ytSearch(q);
-        if (!results?.videos?.length) {
-            return res.status(404).json({ error: 'No results found' });
-        }
+        if (!results?.videos?.length) return res.status(404).json({ error: 'No results' });
 
         const video = results.videos[0];
         const videoUrl = `https://www.youtube.com/watch?v=${video.videoId}`;
 
-        // 2. Get audio-only formats via ytdl-core
         const info = await ytdl.getInfo(videoUrl);
         const formats = ytdl.filterFormats(info.formats, 'audioonly');
+        if (!formats.length) return res.status(404).json({ error: 'No audio formats' });
 
-        if (!formats.length) {
-            return res.status(404).json({ error: 'No audio formats found' });
-        }
-
-        // 3. Pick best quality audio (prefer mp4a/m4a for browser compatibility)
         formats.sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0));
         const best = formats.find(f => f.mimeType?.includes('mp4')) || formats[0];
 
+        // Return metadata + a proxy URL so browser can play without CORS issues
         res.json({
             videoId: video.videoId,
             title: video.title,
-            streamUrl: best.url,
             duration: video.seconds,
-            bitrate: best.audioBitrate
+            // The browser will call /api/proxy-stream with this videoId
+            streamUrl: `/api/proxy-stream?v=${video.videoId}`
         });
-
     } catch (e) {
         console.error('Stream error:', e.message);
-        res.status(500).json({ error: 'Failed to get audio stream', detail: e.message });
+        res.status(500).json({ error: e.message });
     }
 });
+
+// Proxies the actual audio bytes through our server so browser has no CORS issue
+app.get('/api/proxy-stream', async (req, res) => {
+    const { v } = req.query;
+    if (!v) return res.status(400).send('Video ID required');
+
+    try {
+        const videoUrl = `https://www.youtube.com/watch?v=${v}`;
+        const info = await ytdl.getInfo(videoUrl);
+        const formats = ytdl.filterFormats(info.formats, 'audioonly');
+        if (!formats.length) return res.status(404).send('No audio');
+
+        formats.sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0));
+        const best = formats.find(f => f.mimeType?.includes('mp4')) || formats[0];
+        const mimeType = best.mimeType?.split(';')[0] || 'audio/mp4';
+
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Transfer-Encoding', 'chunked');
+
+        const stream = ytdl(videoUrl, { format: best });
+        stream.on('error', err => { console.error('ytdl stream error:', err.message); res.end(); });
+        stream.pipe(res);
+    } catch (e) {
+        console.error('Proxy stream error:', e.message);
+        res.status(500).send(e.message);
+    }
+});
+
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`y2kify server on http://localhost:${PORT}`));

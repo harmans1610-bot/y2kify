@@ -275,7 +275,7 @@ function renderViewTracklist(listId, tracks, isAlbum) {
     ul.innerHTML = '';
     tracks.forEach((track, i) => {
         if (!track) return;
-        const li = makeLi(track, i, isAlbum);
+        const li = makeLi(track, i, 'view');
         li.addEventListener('click', () => {
             currentTrackList = tracks;
             currentTrackIdx = i;
@@ -328,29 +328,37 @@ async function loadPlaylist(id) {
 
 function renderSidebarTracks(tracks) {
     sidebarList.innerHTML = '';
+    if (!tracks.length) {
+        sidebarList.innerHTML = '<li style="color:#555;text-align:center;padding:20px;font-size:12px;">no tracks in this playlist</li>';
+        return;
+    }
     tracks.forEach((track, i) => {
-        const li = makeLi(track, i, false);
+        if (!track || !track.artists || !track.artists.length) return;
+        const li = makeLi(track, i, 'sidebar');
         li.addEventListener('click', () => {
             currentTrackIdx = i;
-            const cover = track.album && track.album.images && track.album.images[0] ? track.album.images[0].url : '';
-            playTrack(track.name, track.artists[0].name, track.album ? track.album.name : '', cover, i);
+            const cover = track.album?.images?.[0]?.url || '';
+            playTrack(track.name, track.artists[0].name, track.album?.name || '', cover, i);
         });
         sidebarList.appendChild(li);
     });
 }
 
-function makeLi(track, i, isAlbum) {
+function makeLi(track, i, scope) {
     const li = document.createElement('li');
-    li.id = `track-li-${i}`;
+    li.id = `track-li-${scope}-${i}`;
     li.style.cssText = 'color:#111;border-bottom:1px solid rgba(0,0,0,0.1);padding:8px 16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;';
-    const title = track.name.toLowerCase();
-    const artist = track.artists ? track.artists[0].name.toLowerCase() : '';
+    li.addEventListener('mouseenter', () => li.style.background = 'rgba(0,0,0,0.07)');
+    li.addEventListener('mouseleave', () => { if (!li.classList.contains('active-track')) li.style.background = ''; });
+    const title  = (track.name || 'unknown').toLowerCase();
+    const artist = track.artists?.[0]?.name?.toLowerCase() || '—';
     const ms = track.duration_ms || 0;
-    const m = Math.floor(ms/60000), s = ((ms%60000)/1000|0).toString().padStart(2,'0');
+    const m = Math.floor(ms / 60000);
+    const s = ((ms % 60000) / 1000 | 0).toString().padStart(2, '0');
     li.innerHTML = `
-        <div style="display:flex;gap:10px;overflow:hidden;">
-          <span style="color:#888;font-family:monospace;flex-shrink:0;">${String(i+1).padStart(2,'0')}</span>
-          <div style="display:flex;flex-direction:column;overflow:hidden;">
+        <div style="display:flex;gap:10px;overflow:hidden;flex:1;min-width:0;">
+          <span style="color:#888;font-family:monospace;flex-shrink:0;font-size:11px;">${String(i + 1).padStart(2, '0')}</span>
+          <div style="display:flex;flex-direction:column;overflow:hidden;flex:1;min-width:0;">
             <span style="font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</span>
             <span style="font-size:10px;color:#555;">${artist}</span>
           </div>
@@ -359,6 +367,7 @@ function makeLi(track, i, isAlbum) {
     `;
     return li;
 }
+
 
 // ─── SEARCH ──────────────────────────────────────────────────────────────────
 function setupSearch() {
@@ -381,7 +390,7 @@ async function triggerSearch(query) {
     // Update sidebar with results
     sidebarList.innerHTML = '';
     tracks.forEach((track, i) => {
-        const li = makeLi(track, i, false);
+        const li = makeLi(track, i, 'search');
         li.addEventListener('click', () => {
             currentTrackIdx = i;
             const cover = track.album && track.album.images && track.album.images[0] ? track.album.images[0].url : '';
