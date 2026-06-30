@@ -1,8 +1,10 @@
-require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
+const ytSearch = require('yt-search');
+const youtubedl = require('youtube-dl-exec');
+require('dotenv').config();
 
 const app = express();
 app.use(cors());
@@ -10,11 +12,9 @@ app.use(cookieParser());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-const CLIENT_ID       = process.env.SPOTIFY_CLIENT_ID;
-const CLIENT_SECRET   = process.env.SPOTIFY_CLIENT_SECRET;
-const REDIRECT_URI    = process.env.REDIRECT_URI;
-// URL of the separate yt-dlp audio microservice (set in Render env vars)
-const AUDIO_SERVICE   = process.env.AUDIO_SERVICE_URL || 'http://localhost:5001';
+const CLIENT_ID     = process.env.SPOTIFY_CLIENT_ID;
+const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
+const REDIRECT_URI  = process.env.REDIRECT_URI;
 
 // ─── SPOTIFY OAUTH ───────────────────────────────────────────────────────────
 app.get('/auth/login', (req, res) => {
@@ -38,7 +38,9 @@ app.get('/auth/callback', async (req, res) => {
     const { code, state } = req.query;
     const storedState = req.cookies ? req.cookies['spotify_auth_state'] : null;
 
-    if (!state || state !== storedState) return res.redirect('/#error=state_mismatch');
+    if (!state || state !== storedState) {
+        return res.redirect('/#error=state_mismatch');
+    }
     res.clearCookie('spotify_auth_state');
 
     try {
@@ -79,51 +81,60 @@ app.post('/auth/refresh', async (req, res) => {
     }
 });
 
-// ─── AUDIO STREAM — proxied to external yt-dlp microservice ─────────────────
-// This endpoint just forwards the request to the audio service, keeping the
-// frontend unaware of where the audio service lives.
+// ─── AUDIO STREAM (yt-dlp) ───────────────────────────────────────────────────
 app.get('/api/stream', async (req, res) => {
     const { q } = req.query;
     if (!q) return res.status(400).json({ error: 'Query required' });
 
     try {
-        console.log(`[stream] Requesting audio for: ${q}`);
-        const r = await axios.get(`${AUDIO_SERVICE}/stream`, {
-            params: { q },
-            timeout: 30000
+        const results = await ytSearch(q);
+        if (!results?.videos?.length) return res.status(404).json({ error: 'No results' });
+
+        const video = results.videos[0];
+        
+        // Return metadata + a proxy URL so browser can play without CORS issues
+        res.json({
+            videoId: video.videoId,
+            title: video.title,
+            duration: video.seconds,
+            streamUrl: `/api/proxy-stream?v=${video.videoId}`
         });
-        res.json(r.data);
     } catch (e) {
-        const status = e.response?.status || 502;
-        const msg    = e.response?.data?.error || e.message;
-        console.error('[stream] Audio service error:', msg);
-        res.status(status).json({ error: msg });
+        console.error('Stream search error:', e.message);
+        res.status(500).json({ error: e.message });
     }
 });
 
-// ─── AUDIO PROXY — streams bytes from the audio service through to browser ───
-// Needed so browser has no CORS issue playing the audio.
-app.get('/api/proxy-stream', async (req, res) => {
-    const { url } = req.query;
-    if (!url) return res.status(400).send('url param required');
+// Proxies the actual audio bytes through our server via yt-dlp stdout
+app.get('/api/proxy-stream', (req, res) => {
+    const { v } = req.query;
+    if (!v) return res.status(400).send('Video ID required');
 
-    try {
-        const upstream = await axios.get(decodeURIComponent(url), {
-            responseType: 'stream',
-            timeout: 10000,
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
-        res.setHeader('Content-Type', upstream.headers['content-type'] || 'audio/mp4');
-        res.setHeader('Accept-Ranges', 'bytes');
-        if (upstream.headers['content-length']) {
-            res.setHeader('Content-Length', upstream.headers['content-length']);
-        }
-        upstream.data.pipe(res);
-    } catch (e) {
-        console.error('[proxy-stream] error:', e.message);
-        res.status(502).send('Failed to proxy audio');
-    }
+    const videoUrl = `https://www.youtube.com/watch?v=${v}`;
+    
+    res.setHeader('Content-Type', 'audio/mp4');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    // Run yt-dlp to get the best audio and pipe it directly to the response
+    const subprocess = youtubedl.exec(videoUrl, {
+        output: '-',
+        format: 'bestaudio[ext=m4a]/bestaudio/best',
+    }, { stdio: ['ignore', 'pipe', 'ignore'] });
+
+    subprocess.stdout.pipe(res);
+    
+    subprocess.on('error', (err) => {
+        console.error('yt-dlp proxy stream error:', err.message);
+        if (!res.headersSent) res.status(500).send(err.message);
+        else res.end();
+    });
+    
+    req.on('close', () => {
+        subprocess.kill('SIGKILL');
+    });
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`y2kify on http://localhost:${PORT} | audio service: ${AUDIO_SERVICE}`));
+app.listen(PORT, () => console.log(`y2kify server on http://localhost:${PORT}`));
