@@ -109,20 +109,19 @@ async function sp(endpoint) {
             headers: { Authorization: `Bearer ${currentToken}` }
         });
         if (r.status === 401) {
-            // Force re-login
             ['sp_token','sp_refresh','sp_expires_at'].forEach(k => localStorage.removeItem(k));
-            loginBtn.textContent = 'login with spotify';
-            loginBtn.href = '/auth/login';
-            currentToken = null;
-            return null;
+            window.location.href = window.location.pathname; 
+            return { _error: 401 };
         }
         if (r.status === 403) {
-            console.warn('Spotify 403 on', endpoint, '— likely missing scope. Re-login to grant new permissions.');
-            return null;
+            console.warn('Spotify 403 on', endpoint);
+            return { _error: 403 };
         }
-        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+        if (!r.ok) {
+            return { _error: r.status };
+        }
         return r.json();
-    } catch(e) { console.error('Spotify API error:', endpoint, e); return null; }
+    } catch(e) { console.error('Spotify API error:', endpoint, e); return { _error: 'fetch_failed' }; }
 }
 
 async function initSession() {
@@ -319,8 +318,9 @@ function renderPlaylistCards(playlists, container) {
 async function loadPlaylist(id) {
     sidebarList.innerHTML = '<li style="color:#555;text-align:center;padding:20px;">loading...</li>';
     const data = await sp(`/playlists/${id}/tracks?limit=100`);
-    if (!data) {
-        sidebarList.innerHTML = '<li style="color:#d44;text-align:center;padding:20px;font-size:12px;">Failed to load playlist. Click "logout" and log back in to refresh permissions.</li>';
+    if (!data || data._error) {
+        const errCode = data ? data._error : 'unknown';
+        sidebarList.innerHTML = `<li style="color:#d44;text-align:center;padding:20px;font-size:12px;">Failed to load playlist (Error: ${errCode}). Click "logout" and log back in.</li>`;
         return;
     }
     const tracks = data.items.map(i => i.track).filter(Boolean);
