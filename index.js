@@ -88,61 +88,51 @@ app.post('/auth/refresh', async (req, res) => {
     }
 });
 
-// ─── AUDIO STREAM (yt-dlp via IPv6) ───────────────────────────────────────────
+const DROPLET_IP = '143.110.245.170';
+
+// ─── AUDIO STREAM (via Dedicated Droplet) ──────────────────────────────────
 app.get('/api/stream', async (req, res) => {
     const { q } = req.query;
     if (!q) return res.status(400).json({ error: 'Query required' });
-
     try {
-        const results = await ytSearch(q);
-        if (!results?.videos?.length) return res.status(404).json({ error: 'No results' });
-
-        const video = results.videos[0];
-        
-        // Return metadata + a proxy URL so browser can play without CORS issues
-        res.json({
-            videoId: video.videoId,
-            title: video.title,
-            duration: video.seconds,
-            streamUrl: `/api/proxy-stream?v=${video.videoId}`
-        });
+        const r = await axios.get(`http://${DROPLET_IP}:3000/api/stream?q=${encodeURIComponent(q)}`);
+        const data = r.data;
+        // Point the browser to Render's proxy to avoid Mixed Content (HTTP on HTTPS)
+        data.streamUrl = `/api/proxy-stream?v=${data.videoId}`;
+        res.json(data);
     } catch (e) {
-        console.error('Stream search error:', e.message);
-        res.status(500).json({ error: e.message });
+        console.error('Droplet search error:', e.message);
+        res.status(500).json({ error: 'Audio server unreachable' });
     }
 });
 
-// Proxies the actual audio bytes through our server via yt-dlp stdout
-app.get('/api/proxy-stream', (req, res) => {
+// Proxies the actual audio bytes from the Droplet through Render to the browser
+app.get('/api/proxy-stream', async (req, res) => {
     const { v } = req.query;
     if (!v) return res.status(400).send('Video ID required');
 
-    const videoUrl = `https://www.youtube.com/watch?v=${v}`;
-    
-    res.setHeader('Content-Type', 'audio/mp4');
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Transfer-Encoding', 'chunked');
+    try {
+        const r = await axios({
+            method: 'get',
+            url: `http://${DROPLET_IP}:3000/api/proxy-stream?v=${v}`,
+            responseType: 'stream'
+        });
+        
+        if (r.headers['content-type']) res.setHeader('Content-Type', r.headers['content-type']);
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Transfer-Encoding', 'chunked');
 
-    // Run yt-dlp with --force-ipv6 to bypass standard datacenter IPv4 bans!
-    const subprocess = youtubedl.exec(videoUrl, {
-        output: '-',
-        format: 'bestaudio[ext=m4a]/bestaudio/best',
-        forceIpv6: true, // Crucial for cloud bypassing!
-        noCheckCertificates: true
-    }, { stdio: ['ignore', 'pipe', 'ignore'] });
-
-    subprocess.stdout.pipe(res);
-    
-    subprocess.on('error', (err) => {
-        console.error('yt-dlp proxy stream error:', err.message);
-        if (!res.headersSent) res.status(500).send(err.message);
-        else res.end();
-    });
-    
-    req.on('close', () => {
-        subprocess.kill('SIGKILL');
-    });
+        r.data.pipe(res);
+        r.data.on('error', err => {
+            console.error('Droplet stream closed:', err.message);
+            if (!res.headersSent) res.status(500).send(err.message);
+            else res.end();
+        });
+    } catch (e) {
+        console.error('Droplet proxy error:', e.message);
+        if (!res.headersSent) res.status(500).send('Audio server stream error');
+    }
 });
 
 const PORT = process.env.PORT || 3000;
