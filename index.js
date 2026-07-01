@@ -88,9 +88,6 @@ app.post('/auth/refresh', async (req, res) => {
     }
 });
 
-const ytSearch = require('yt-search');
-const youtubedl = require('youtube-dl-exec');
-
 // ─── AUDIO STREAM (yt-dlp via IPv6) ───────────────────────────────────────────
 app.get('/api/stream', async (req, res) => {
     const { q } = req.query;
