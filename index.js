@@ -81,23 +81,27 @@ app.post('/auth/refresh', async (req, res) => {
     }
 });
 
-// ─── AUDIO STREAM (yt-dlp) ───────────────────────────────────────────────────
+const scdl = require('soundcloud-downloader').default;
+
+// ─── AUDIO STREAM (SoundCloud) ────────────────────────────────────────────────
 app.get('/api/stream', async (req, res) => {
     const { q } = req.query;
     if (!q) return res.status(400).json({ error: 'Query required' });
 
     try {
-        const results = await ytSearch(q);
-        if (!results?.videos?.length) return res.status(404).json({ error: 'No results' });
+        const results = await scdl.search({ query: q, resourceType: 'tracks' });
+        if (!results.collection || !results.collection.length) {
+            return res.status(404).json({ error: 'No results' });
+        }
 
-        const video = results.videos[0];
+        const track = results.collection[0];
         
         // Return metadata + a proxy URL so browser can play without CORS issues
         res.json({
-            videoId: video.videoId,
-            title: video.title,
-            duration: video.seconds,
-            streamUrl: `/api/proxy-stream?v=${video.videoId}`
+            videoId: track.id, // using track id as unique identifier
+            title: track.title,
+            duration: track.duration / 1000,
+            streamUrl: `/api/proxy-stream?url=${encodeURIComponent(track.permalink_url)}`
         });
     } catch (e) {
         console.error('Stream search error:', e.message);
@@ -105,35 +109,30 @@ app.get('/api/stream', async (req, res) => {
     }
 });
 
-// Proxies the actual audio bytes through our server via yt-dlp stdout
-app.get('/api/proxy-stream', (req, res) => {
-    const { v } = req.query;
-    if (!v) return res.status(400).send('Video ID required');
+// Proxies the actual audio bytes through our server via SoundCloud
+app.get('/api/proxy-stream', async (req, res) => {
+    const { url } = req.query;
+    if (!url) return res.status(400).send('URL required');
 
-    const videoUrl = `https://www.youtube.com/watch?v=${v}`;
-    
-    res.setHeader('Content-Type', 'audio/mp4');
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Transfer-Encoding', 'chunked');
+    try {
+        const stream = await scdl.download(url);
+        
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Transfer-Encoding', 'chunked');
 
-    // Run yt-dlp to get the best audio and pipe it directly to the response
-    const subprocess = youtubedl.exec(videoUrl, {
-        output: '-',
-        format: 'bestaudio[ext=m4a]/bestaudio/best',
-    }, { stdio: ['ignore', 'pipe', 'ignore'] });
-
-    subprocess.stdout.pipe(res);
-    
-    subprocess.on('error', (err) => {
-        console.error('yt-dlp proxy stream error:', err.message);
-        if (!res.headersSent) res.status(500).send(err.message);
-        else res.end();
-    });
-    
-    req.on('close', () => {
-        subprocess.kill('SIGKILL');
-    });
+        stream.pipe(res);
+        
+        stream.on('error', (err) => {
+            console.error('SoundCloud proxy stream error:', err.message);
+            if (!res.headersSent) res.status(500).send(err.message);
+            else res.end();
+        });
+    } catch (e) {
+        console.error('Proxy stream start error:', e.message);
+        res.status(500).send(e.message);
+    }
 });
 
 const PORT = process.env.PORT || 3000;
