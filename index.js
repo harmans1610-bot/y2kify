@@ -122,7 +122,7 @@ app.get('/api/proxy-stream', async (req, res) => {
     if (!url) return res.status(400).send('URL required');
 
     try {
-        const stream = await scdl.downloadFormat(url, scdl.FORMATS.MP3);
+        const stream = await scdl.download(url);
         
         res.setHeader('Content-Type', 'audio/mpeg');
         res.setHeader('Accept-Ranges', 'bytes');
