@@ -88,50 +88,70 @@ app.post('/auth/refresh', async (req, res) => {
     }
 });
 
-const DROPLET_IP = '143.110.245.170';
+const scdl = require('soundcloud-downloader').default;
 
-// ─── AUDIO STREAM (via Dedicated Droplet) ──────────────────────────────────
+// ─── AUDIO STREAM (SoundCloud Smart Filter) ─────────────────────────────────
 app.get('/api/stream', async (req, res) => {
-    const { q } = req.query;
+    const { q, dur } = req.query;
     if (!q) return res.status(400).json({ error: 'Query required' });
+    
     try {
-        const r = await axios.get(`http://${DROPLET_IP}:3000/api/stream?q=${encodeURIComponent(q)}`);
-        const data = r.data;
-        // Point the browser to Render's proxy to avoid Mixed Content (HTTP on HTTPS)
-        data.streamUrl = `/api/proxy-stream?v=${data.videoId}`;
-        res.json(data);
+        const targetDuration = (parseInt(dur) || 0) / 1000;
+        
+        // Search soundcloud for tracks
+        const results = await scdl.search({ query: q, resourceType: 'tracks', limit: 15 });
+        if (!results || !results.collection || !results.collection.length) {
+            return res.status(404).json({ error: 'No results on SoundCloud' });
+        }
+        
+        let bestTrack = null;
+        if (targetDuration > 0) {
+            // Find a track that is >60 seconds and matches Spotify's duration within 15 seconds.
+            // This explicitly filters out the fake 30-second Go+ previews!
+            bestTrack = results.collection.find(t => {
+                const sec = t.duration / 1000;
+                return sec > 60 && Math.abs(sec - targetDuration) < 15;
+            });
+        }
+        
+        // Fallback to the first result if no perfect match, but still avoid 30s previews
+        if (!bestTrack) {
+            bestTrack = results.collection.find(t => (t.duration / 1000) > 40) || results.collection[0];
+        }
+
+        res.json({
+            videoId: bestTrack.id,
+            title: bestTrack.title,
+            duration: Math.floor(bestTrack.duration / 1000),
+            streamUrl: `/api/proxy-stream?url=${encodeURIComponent(bestTrack.permalink_url)}`
+        });
     } catch (e) {
-        console.error('Droplet search error:', e.message);
+        console.error('SoundCloud search error:', e.message);
         res.status(500).json({ error: 'Audio server unreachable' });
     }
 });
 
-// Proxies the actual audio bytes from the Droplet through Render to the browser
+// Proxies the actual audio bytes to bypass CORS
 app.get('/api/proxy-stream', async (req, res) => {
-    const { v } = req.query;
-    if (!v) return res.status(400).send('Video ID required');
+    const { url } = req.query;
+    if (!url) return res.status(400).send('URL required');
 
     try {
-        const r = await axios({
-            method: 'get',
-            url: `http://${DROPLET_IP}:3000/api/proxy-stream?v=${v}`,
-            responseType: 'stream'
-        });
-        
-        if (r.headers['content-type']) res.setHeader('Content-Type', r.headers['content-type']);
+        const stream = await scdl.download(url);
+        res.setHeader('Content-Type', 'audio/mpeg');
         res.setHeader('Accept-Ranges', 'bytes');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Transfer-Encoding', 'chunked');
-
-        r.data.pipe(res);
-        r.data.on('error', err => {
-            console.error('Droplet stream closed:', err.message);
+        
+        stream.pipe(res);
+        stream.on('error', err => {
+            console.error('SoundCloud stream error:', err.message);
             if (!res.headersSent) res.status(500).send(err.message);
             else res.end();
         });
     } catch (e) {
-        console.error('Droplet proxy error:', e.message);
-        if (!res.headersSent) res.status(500).send('Audio server stream error');
+        console.error('SoundCloud proxy error:', e.message);
+        if (!res.headersSent) res.status(500).send('Audio stream error');
     }
 });
 

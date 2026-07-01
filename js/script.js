@@ -432,7 +432,8 @@ async function playTrack(title, artist, album, coverUrl, idx) {
     setPlayPauseIcon(false);
 
     try {
-        const r = await fetch(`/api/stream?q=${encodeURIComponent(title + ' ' + artist)}`);
+        const durationMs = currentTrackList[idx]?.duration_ms || 0;
+        const r = await fetch(`/api/stream?q=${encodeURIComponent(title + ' ' + artist)}&dur=${durationMs}`);
         if (!r.ok) throw new Error('stream fetch failed');
         const data = await r.json();
         currentTrackDuration = data.duration || 0;
