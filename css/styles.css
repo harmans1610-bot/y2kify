@@ -1289,15 +1289,119 @@ svg {
 .progress-fill, #main-progress-fill, .vol-fill {
   position: relative !important;
 }
-.progress-knob, .vol-knob {
+.progress-knob, .vol-knob, #vol-fill-main > div, #vol-fill-bottom > div, .progress-fill > div {
   position: absolute !important;
-  right: -3px !important;
+  right: -4px !important;
   top: 50% !important;
   transform: translateY(-50%) !important;
-  background: #fff !important;
-  border: 1px solid #000 !important;
-  width: 6px !important;
+  background: var(--panel-bg) !important;
+  border: 1px solid #111 !important;
+  width: 8px !important;
   height: 16px !important;
-  border-radius: 0 !important;
-  box-shadow: 1px 1px 0px rgba(0,0,0,0.5) !important;
+  border-radius: 1px !important;
+  box-shadow: inset 1px 1px 2px rgba(255,255,255,0.8), 1px 1px 2px rgba(0,0,0,0.5) !important;
 }
+
+/* --- Y2K GEL AESTHETICS OVERRIDES --- */
+#main-progress-fill, #vol-fill-main, #bottom-progress-fill, #vol-fill-bottom {
+  background: var(--gel-primary) !important;
+  border-right: 1px solid rgba(0,0,0,0.8) !important;
+}
+
+#main-progress, #vol-bar-main, #bottom-progress, #vol-bar-bottom {
+  box-shadow: inset 1px 1px 3px rgba(0,0,0,0.6) !important;
+  border-bottom-color: #999 !important;
+  border-right-color: #999 !important;
+}
+
+/* --- MOBILE RESPONSIVENESS --- */
+@media (max-width: 768px) {
+  .app-container {
+    height: auto;
+    min-height: 100vh;
+    overflow-y: auto;
+  }
+  
+  .main-layout {
+    flex-direction: column;
+    padding: 8px;
+    gap: 8px;
+    overflow: visible;
+  }
+  
+  .sidebar-left, .sidebar-right {
+    width: 100%;
+    flex-shrink: 0;
+  }
+  
+  .nav-menu ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  
+  .nav-menu li {
+    flex: 1 1 30%;
+    justify-content: center;
+    margin: 0;
+  }
+  
+  .top-bar {
+    flex-wrap: wrap;
+    padding: 8px;
+    gap: 8px;
+  }
+  
+  .logo-container {
+    width: auto;
+  }
+  
+  .search-container {
+    width: 100%;
+    margin: 0;
+    order: 3;
+  }
+  
+  .top-links {
+    margin: 0;
+    margin-left: auto;
+  }
+  
+  .bottom-bar {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 8px;
+    gap: 12px;
+  }
+  
+  .bottom-left, .bottom-center, .bottom-right {
+    width: 100%;
+    justify-content: center;
+  }
+  
+  .bottom-left {
+    justify-content: flex-start;
+  }
+  
+  .bottom-right {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  
+  .player-controls-large {
+    flex-wrap: wrap;
+  }
+  
+  .volume-control-large {
+    position: static !important;
+    width: 100%;
+    justify-content: center;
+    margin-top: 12px;
+  }
+  
+  .player-timeline {
+    padding: 0 8px !important;
+  }
+}
+
