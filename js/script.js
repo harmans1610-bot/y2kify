@@ -9,6 +9,7 @@ let isRepeat        = false;
 let currentVolume   = 0.8;
 let currentTrackList = [];
 let currentTrackIdx = -1;
+let currentTrackDuration = 0; // True duration from API
 
 // ─── DOM REFS ────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -434,6 +435,7 @@ async function playTrack(title, artist, album, coverUrl, idx) {
         const r = await fetch(`/api/stream?q=${encodeURIComponent(title + ' ' + artist)}`);
         if (!r.ok) throw new Error('stream fetch failed');
         const data = await r.json();
+        currentTrackDuration = data.duration || 0;
 
         currentAudio = new Audio(data.streamUrl);
         currentAudio.volume = currentVolume;
@@ -542,12 +544,15 @@ function setupProgressBars() {
 
 function updateProgress() {
     if (!currentAudio) return;
-    const cur = currentAudio.currentTime, tot = currentAudio.duration;
-    if (isNaN(tot) || tot === 0) return;
-    const pct = (cur / tot * 100).toFixed(1) + '%';
-    if (progressFill) progressFill.style.width = pct;
-    if (bottomFill)   bottomFill.style.width   = pct;
-    const cs = formatTime(cur), ts = formatTime(tot);
+    const cur = currentAudio.currentTime;
+    const dur = currentTrackDuration || currentAudio.duration;
+    if (!dur || isNaN(dur)) return;
+
+    const p = (cur / dur) * 100;
+    if (progressFill) progressFill.style.width = p + '%';
+    if (bottomFill)   bottomFill.style.width   = p + '%';
+    
+    const cs = formatTime(cur), ts = formatTime(dur);
     if (timeCurrent) timeCurrent.textContent = cs;
     if (timeTotal)   timeTotal.textContent   = ts;
     if (bottomTime)  bottomTime.textContent  = `${cs} / ${ts}`;
