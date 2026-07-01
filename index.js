@@ -30,7 +30,14 @@ app.get('/auth/login', (req, res) => {
     res.cookie('spotify_auth_state', state, { sameSite: 'lax' });
 
     res.redirect('https://accounts.spotify.com/authorize?' +
-        new URLSearchParams({ response_type: 'code', client_id: CLIENT_ID, scope, redirect_uri: REDIRECT_URI, state }).toString()
+        new URLSearchParams({ 
+            response_type: 'code', 
+            client_id: CLIENT_ID, 
+            scope, 
+            redirect_uri: REDIRECT_URI, 
+            state,
+            show_dialog: 'true' // Forces the permission prompt to appear
+        }).toString()
     );
 });
 
