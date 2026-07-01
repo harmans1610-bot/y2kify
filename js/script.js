@@ -79,7 +79,7 @@ function checkToken() {
         loginBtn.addEventListener('click', e => {
             e.preventDefault();
             ['sp_token','sp_refresh','sp_expires_at'].forEach(k => localStorage.removeItem(k));
-            window.location.reload();
+            window.location.href = window.location.pathname; // Clear the hash and reload
         });
         initSession();
     }
