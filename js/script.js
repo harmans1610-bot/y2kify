@@ -202,18 +202,15 @@ async function loadView(view) {
     viewLoaded[view] = true;
 
     if (view === 'discover') {
-        const data = await sp('/browse/new-releases?limit=20');
-        if (!data) return;
-        const tracks = [];
-        data.albums.items.forEach(album => {
-            tracks.push({
-                name: album.name,
-                artists: album.artists,
-                album: album,
-                duration_ms: 0
-            });
-        });
-        renderViewTracklist('discover-tracklist', tracks, true);
+        // Fetch recommendations based on user's top tracks for a personalized discover feed
+        const top = await sp('/me/top/tracks?limit=3');
+        let seeds = '';
+        if (top && top.items && top.items.length) {
+            seeds = `&seed_tracks=${top.items.map(t=>t.id).join(',')}`;
+        }
+        const rec = await sp(`/recommendations?limit=40${seeds}`);
+        if (!rec || !rec.tracks) return;
+        renderViewTracklist('discover-tracklist', rec.tracks, false);
     }
 
     if (view === 'library') {
@@ -374,9 +371,22 @@ function makeLi(track, i, scope) {
 
 
 // ─── SEARCH ──────────────────────────────────────────────────────────────────
+let searchTimeout;
 function setupSearch() {
+    searchInput.addEventListener('input', e => {
+        clearTimeout(searchTimeout);
+        const query = searchInput.value.trim();
+        if (query) {
+            searchTimeout = setTimeout(() => {
+                triggerSearch(query);
+                switchView('now-playing');
+            }, 600);
+        }
+    });
+
     searchInput.addEventListener('keydown', e => {
         if (e.key === 'Enter' && searchInput.value.trim()) {
+            clearTimeout(searchTimeout);
             triggerSearch(searchInput.value.trim());
             switchView('now-playing');
         }
